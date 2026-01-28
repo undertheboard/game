@@ -199,7 +199,10 @@ public class GameServer {
             
             System.out.println("Player joined: " + message.getPlayerName() + " (ID: " + playerId + ")");
             
-            // Send initial game state to the new player
+            // Send player ID to the client first
+            sendMessage(new PlayerIdMessage(playerId));
+            
+            // Then send initial game state to the new player
             sendMessage(new GameStateMessage(gameState));
         }
         

@@ -94,6 +94,12 @@ public class GameClient {
      * Connect to a game server.
      */
     public boolean connect(String host, int port, String playerName) {
+        // Validate player name
+        if (playerName == null || playerName.trim().isEmpty()) {
+            playerName = "Player";
+        }
+        playerName = playerName.trim();
+        
         try {
             socket = new Socket(host, port);
             out = new ObjectOutputStream(socket.getOutputStream());
@@ -139,18 +145,11 @@ public class GameClient {
         if (message.getType() == NetworkMessage.MessageType.GAME_STATE) {
             GameStateMessage stateMsg = (GameStateMessage) message;
             this.gameState = stateMsg.getGameState();
-            
-            // Find our player ID if we don't have it yet
-            if (playerId == null && !gameState.getPlayers().isEmpty()) {
-                // The most recently added player is likely us
-                long mostRecent = 0;
-                for (PlayerModel player : gameState.getPlayers().values()) {
-                    if (player.getLastUpdate() > mostRecent) {
-                        mostRecent = player.getLastUpdate();
-                        playerId = player.getId();
-                    }
-                }
-            }
+        } else if (message.getType() == NetworkMessage.MessageType.PLAYER_JOIN) {
+            // Receive player ID from server
+            PlayerIdMessage idMsg = (PlayerIdMessage) message;
+            this.playerId = idMsg.getPlayerId();
+            System.out.println("Assigned player ID: " + playerId);
         }
     }
     

@@ -21,7 +21,6 @@ public class Game {
     private long window;
     private Field field;
     private GameClient client;
-    private PlayerModel localPlayer;
 
     private static final int WINDOW_WIDTH = 800;
     private static final int WINDOW_HEIGHT = 600;
@@ -50,55 +49,59 @@ public class Game {
     
     private boolean connectToServer() {
         client = new GameClient();
-        Scanner scanner = new Scanner(System.in);
         
-        System.out.println("=== Game Client ===");
-        System.out.println("Discovering servers on local network...");
-        
-        List<GameClient.ServerInfo> servers = client.discoverServers();
-        
-        if (servers.isEmpty()) {
-            System.out.println("No servers found. Enter server address manually? (y/n)");
-            String response = scanner.nextLine().trim().toLowerCase();
+        try (Scanner scanner = new Scanner(System.in)) {
+            System.out.println("=== Game Client ===");
+            System.out.println("Discovering servers on local network...");
             
-            if (response.equals("y")) {
-                System.out.print("Server address (default: localhost): ");
-                String host = scanner.nextLine().trim();
-                if (host.isEmpty()) host = "localhost";
+            List<GameClient.ServerInfo> servers = client.discoverServers();
+            
+            if (servers.isEmpty()) {
+                System.out.println("No servers found. Enter server address manually? (y/n)");
+                String response = scanner.nextLine().trim().toLowerCase();
+                
+                if (response.equals("y")) {
+                    System.out.print("Server address (default: localhost): ");
+                    String host = scanner.nextLine().trim();
+                    if (host.isEmpty()) host = "localhost";
+                    
+                    System.out.print("Player name: ");
+                    String playerName = scanner.nextLine().trim();
+                    if (playerName.isEmpty()) playerName = "Player";
+                    
+                    return client.connect(host, 9876, playerName);
+                } else {
+                    return false;
+                }
+            } else {
+                System.out.println("\nDiscovered servers:");
+                for (int i = 0; i < servers.size(); i++) {
+                    System.out.println((i + 1) + ". " + servers.get(i));
+                }
+                
+                System.out.print("\nSelect server (1-" + servers.size() + "): ");
+                int choice = 0;
+                try {
+                    choice = Integer.parseInt(scanner.nextLine().trim()) - 1;
+                } catch (NumberFormatException e) {
+                    choice = 0;
+                }
+                
+                if (choice < 0 || choice >= servers.size()) {
+                    choice = 0;
+                }
+                
+                GameClient.ServerInfo server = servers.get(choice);
                 
                 System.out.print("Player name: ");
                 String playerName = scanner.nextLine().trim();
                 if (playerName.isEmpty()) playerName = "Player";
                 
-                return client.connect(host, 9876, playerName);
-            } else {
-                return false;
+                return client.connect(server.getAddress(), server.getPort(), playerName);
             }
-        } else {
-            System.out.println("\nDiscovered servers:");
-            for (int i = 0; i < servers.size(); i++) {
-                System.out.println((i + 1) + ". " + servers.get(i));
-            }
-            
-            System.out.print("\nSelect server (1-" + servers.size() + "): ");
-            int choice = 0;
-            try {
-                choice = Integer.parseInt(scanner.nextLine().trim()) - 1;
-            } catch (NumberFormatException e) {
-                choice = 0;
-            }
-            
-            if (choice < 0 || choice >= servers.size()) {
-                choice = 0;
-            }
-            
-            GameClient.ServerInfo server = servers.get(choice);
-            
-            System.out.print("Player name: ");
-            String playerName = scanner.nextLine().trim();
-            if (playerName.isEmpty()) playerName = "Player";
-            
-            return client.connect(server.getAddress(), server.getPort(), playerName);
+        } catch (Exception e) {
+            System.err.println("Error during server connection: " + e.getMessage());
+            return false;
         }
     }
 
@@ -199,33 +202,33 @@ public class Game {
         // Get local player
         if (client.getPlayerId() == null) return;
         
-        localPlayer = client.getGameState().getPlayer(client.getPlayerId());
-        if (localPlayer == null) return;
+        PlayerModel player = client.getGameState().getPlayer(client.getPlayerId());
+        if (player == null) return;
         
         float speed = 5.0f;
-        float newTargetX = localPlayer.getTargetX();
-        float newTargetY = localPlayer.getTargetY();
+        float currentTargetX = player.getTargetX();
+        float currentTargetY = player.getTargetY();
         boolean moved = false;
         
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
-            newTargetY -= speed;
+            currentTargetY -= speed;
             moved = true;
         }
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
-            newTargetY += speed;
+            currentTargetY += speed;
             moved = true;
         }
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
-            newTargetX -= speed;
+            currentTargetX -= speed;
             moved = true;
         }
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
-            newTargetX += speed;
+            currentTargetX += speed;
             moved = true;
         }
         
         if (moved) {
-            client.sendMove(newTargetX, newTargetY);
+            client.sendMove(currentTargetX, currentTargetY);
         }
     }
 

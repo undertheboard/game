@@ -3,9 +3,11 @@ package com.undertheboard.game.common;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Represents the complete game state including all players.
+ * Thread-safe for concurrent access from multiple threads.
  */
 public class GameState implements Serializable {
     private static final long serialVersionUID = 1L;
@@ -14,7 +16,7 @@ public class GameState implements Serializable {
     private long timestamp;
     
     public GameState() {
-        this.players = new HashMap<>();
+        this.players = new ConcurrentHashMap<>();
         this.timestamp = System.currentTimeMillis();
     }
     
