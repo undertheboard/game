@@ -45,7 +45,7 @@ public class Game {
         // Configure GLFW
         glfwDefaultWindowHints();
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
         // Create the window
         window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Walkable Field Game", NULL, NULL);
@@ -92,8 +92,8 @@ public class Game {
         GL.createCapabilities();
 
         // Initialize game objects
-        player = new Player(400, 300);
-        field = new Field(800, 600);
+        player = new Player(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+        field = new Field(WINDOW_WIDTH, WINDOW_HEIGHT);
 
         // Set up the viewport
         glMatrixMode(GL_PROJECTION);

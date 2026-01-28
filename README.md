@@ -45,6 +45,7 @@ java -jar target/game-1.0.0.jar
 
 - Java 11 or higher
 - Maven 3.6 or higher
+- **Platform**: The compiled JAR includes native libraries for Linux. To run on Windows or macOS, you need to rebuild the project on that platform (Maven will automatically download the correct native libraries for your system).
 
 ## Description
 
