@@ -34,8 +34,8 @@ mvn clean package
 ```
 
 This will create two JAR files in the `target/` directory:
-- `game-server-1.0.0-server.jar` - The game server
-- `game-client-1.0.0-client.jar` - The game client
+- `game-server-1.0.0.jar` - The game server
+- `game-client-1.0.0.jar` - The game client
 
 ## Running
 
@@ -44,13 +44,13 @@ This will create two JAR files in the `target/` directory:
 To start a game server:
 
 ```bash
-java -jar target/game-server-1.0.0-server.jar "My Server Name"
+java -jar game-server-1.0.0.jar "My Server Name"
 ```
 
 Or without a server name:
 
 ```bash
-java -jar target/game-server-1.0.0-server.jar
+java -jar game-server-1.0.0.jar
 ```
 
 The server will:
@@ -63,7 +63,7 @@ The server will:
 To start a game client:
 
 ```bash
-java -jar target/game-client-1.0.0-client.jar
+java -jar game-client-1.0.0.jar
 ```
 
 The client will:
