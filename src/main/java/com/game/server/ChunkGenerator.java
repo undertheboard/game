@@ -70,7 +70,7 @@ public class ChunkGenerator {
             return new Tile(TileType.WATER, Biome.OCEAN, (float) elevation);
         }
 
-        // Normalise biomeVal from [-1,1] to [0,1]
+        // Normalize biomeVal from [-1,1] to [0,1]
         double normalBiome = (biomeVal + 1.0) / 2.0;
 
         if (normalBiome < BIOME_FOREST_MAX) {

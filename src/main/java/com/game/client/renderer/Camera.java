@@ -23,8 +23,8 @@ public class Camera {
         this.viewportHeight = viewportHeight;
     }
 
-    /** Moves the camera so it is centred on the given world coordinate. */
-    public void centreOn(double worldX, double worldY) {
+    /** Moves the camera so it is centered on the given world coordinate. */
+    public void centerOn(double worldX, double worldY) {
         this.worldX = worldX - (viewportWidth / 2.0 / (TILE_SIZE * zoom));
         this.worldY = worldY - (viewportHeight / 2.0 / (TILE_SIZE * zoom));
     }

@@ -6,7 +6,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
 /**
- * Custom "Skinable" button that draws itself using the active {@link UITheme}.
+ * Custom "Skinnable" button that draws itself using the active {@link UITheme}.
  * Supports hover highlighting, rounded corners, and an optional icon character.
  */
 public class UIButton extends JButton {

@@ -234,7 +234,7 @@ public class GameClient extends JFrame {
         if (localPlayer == null) return;
         localPlayer.setX(localPlayer.getX() + dx);
         localPlayer.setY(localPlayer.getY() + dy);
-        camera.centreOn(localPlayer.getX(), localPlayer.getY());
+        camera.centerOn(localPlayer.getX(), localPlayer.getY());
         sendPacket(new PlayerMovePacket(localPlayer.getX(), localPlayer.getY()));
         requestNearbyChunks();
     }
@@ -262,7 +262,7 @@ public class GameClient extends JFrame {
                 connected = true;
                 localPlayer = new Player("Player", 0, 0);
                 renderer.addEntity(localPlayer);
-                camera.centreOn(0, 0);
+                camera.centerOn(0, 0);
                 requestNearbyChunks();
                 SwingUtilities.invokeLater(() ->
                         statusLabel.setText("Connected to " + host + ":" + port));

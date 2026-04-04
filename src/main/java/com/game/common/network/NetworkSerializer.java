@@ -31,7 +31,9 @@ public class NetworkSerializer {
 
     public NetworkSerializer() {
         this.kryo = new Kryo();
-        kryo.setRegistrationRequired(false);
+        // Only allow explicitly registered classes to be deserialized.
+        // This prevents unsafe arbitrary-class deserialization from user-supplied data.
+        kryo.setRegistrationRequired(true);
         registerClasses();
     }
 
