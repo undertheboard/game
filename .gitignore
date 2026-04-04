@@ -1,0 +1,22 @@
+# Maven build artifacts - keep target/game-server.jar and target/game-client.jar committed
+target/game-1.0.0.jar
+target/original-game-*.jar
+target/game-1.0.0-client.jar
+target/surefire-reports/
+target/classes/
+target/test-classes/
+target/maven-archiver/
+target/maven-status/
+dependency-reduced-pom.xml
+
+# IDE files
+.idea/
+*.iml
+.eclipse/
+.settings/
+.project
+.classpath
+
+# OS files
+.DS_Store
+Thumbs.db
