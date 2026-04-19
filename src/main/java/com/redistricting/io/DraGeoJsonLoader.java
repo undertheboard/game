@@ -94,14 +94,35 @@ public final class DraGeoJsonLoader {
             if (rings.isEmpty()) continue;
 
             // DRA district IDs start at 1; our internal districts are 0-indexed.
+            // Preserve the real precinct id when the source file carries one
+            // (RDH, our own writer, etc.); otherwise fall back to "D{n}" so
+            // legacy DRA District Shapes exports keep their old behaviour.
+            String precinctId = readPrecinctId(props);
+            if (precinctId == null || precinctId.isBlank()) {
+                precinctId = "D" + district;
+            }
             precincts.add(new Precinct(
-                    "D" + district, district - 1, population, dem, rep, rings));
+                    precinctId, district - 1, population, dem, rep, rings));
         }
 
         if (precincts.isEmpty()) {
             throw new IllegalArgumentException("DRA GeoJSON: no usable features");
         }
         return new RedistrictingMap(name, maxDistrict, precincts);
+    }
+
+    private static String readPrecinctId(Map<String, Object> props) {
+        // Common RDH / Census / DRA id property names, case-insensitive.
+        for (String key : props.keySet()) {
+            String lk = key.toLowerCase(Locale.ROOT);
+            if (lk.equals("id") || lk.equals("precinct") || lk.equals("precinctid")
+                    || lk.equals("geoid") || lk.equals("geoid20") || lk.equals("geoid10")
+                    || lk.equals("vtdid") || lk.equals("vtdst20") || lk.equals("uniqueid")) {
+                Object v = props.get(key);
+                if (v != null) return String.valueOf(v).trim();
+            }
+        }
+        return null;
     }
 
     private static int readDistrict(Map<String, Object> props, int fallback) {

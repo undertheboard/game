@@ -2,21 +2,53 @@
 
 A Java Swing desktop app that:
 
+- **Loads precinct data** from the
+  [Redistricting Data Hub (RDH)](https://redistrictingdatahub.org/). On
+  startup the app prompts you to load a statewide precinct file (or use
+  the bundled sample) — redistricting works at the precinct level and
+  every menu is unlocked once a base map is loaded.
 - **Imports redistricting plans directly** from
   [Dave's Redistricting App (DRA)](https://davesredistricting.org/) — pick
   any file produced by DRA's *Export Map to a File* dialog (District Shapes
   `.geojson`, Map Archive `.json`, or District Data `.csv`) and the format
-  is auto-detected.
-- **Displays** the plan on a pannable / zoomable canvas with district colours,
-  per-precinct tooltips, and a legend.
+  is auto-detected. Map Archive `.json` files without embedded geometry
+  are accepted as assignment-only overlays applied to the loaded base.
+- **Saves plans** as precinct-level GeoJSON (round-trips cleanly through
+  the importer) so you can move plans between sessions.
+- Uses **native OS file dialogs** — Windows Explorer on Windows, Finder
+  on macOS, GTK on most Linux desktops — instead of Swing's chooser.
+- **Displays** the plan on a pannable / zoomable canvas with three
+  independent view toggles in the *View* menu:
+  - colour by district vs. by **partisan lean** (red ⇄ blue),
+  - **show / hide precinct lines**,
+  - **show / hide district numbers** (rendered with a halo at each
+    district's population-weighted centroid).
 - **Analyses fairness** with an AI scorer (population deviation,
   Polsby-Popper compactness, efficiency gap, plus a combined unfairness score).
-- **Optimises** precinct-level plans with a hill-climbing search.
-- **Generates plans** of its own from a slider panel that controls
-  partisan bias (R+100 ⇄ D+100), county-line adherence, compactness,
-  population tolerance, reliability (restart count), and a reproducible seed.
+- **Generates plans** with one of five algorithms — see *Generators* below.
+- Ships with a built-in **dark theme**.
 - Includes an in-app **Tutorial** that walks new users through every step
   (auto-shown on first launch, re-openable from *Help → Tutorial*).
+
+## Generators
+
+`AI → Generate Plan…` opens a Simple / Advanced generator dialog. *Simple*
+mode just asks for the number of districts and a seed and runs the
+`SimpleAlgorithm`. *Advanced* mode exposes an algorithm dropdown and the
+full set of objective sliders (partisan bias, county adherence,
+compactness, population tolerance, reliability).
+
+| Algorithm                     | Goal                                                                 |
+| ----------------------------- | -------------------------------------------------------------------- |
+| **Simple**                    | Fast equal-population region growing with a balancing pass           |
+| **Advanced (multi-objective)**| Population + partisan target + county adherence + compactness, with multi-attempt growth and a boundary local-search refiner |
+| **Compactness (Lloyd / k-means)** | Population-weighted Lloyd iterations producing geometrically tight districts |
+| **Competitive**               | Boundary refinement that drives every district toward 50/50          |
+| **Partisan target**           | Hits the bias slider's target Dem-seat count as closely as possible  |
+
+All algorithms guarantee contiguous districts (a final
+`GeographyUtils.repairContiguity` pass re-attaches any orphan island to
+its strongest neighbouring district).
 
 ## Build
 

@@ -286,10 +286,10 @@ public final class DraMapArchiveLoader {
             int ord = ordinal.get(origDistrict);
             int x = ord % side;
             int y = ord / side;
-            int precincts_in_district = popCount.getOrDefault(origDistrict, 1);
+            int precinctsInDistrict = popCount.getOrDefault(origDistrict, 1);
             // Synthetic population proportional to # of precincts assigned
             // (gives a hint at relative district sizes when known).
-            int pop = Math.max(1, precincts_in_district * 100);
+            int pop = Math.max(1, precinctsInDistrict * 100);
             List<double[]> ring = List.of(
                     new double[] { x, y },
                     new double[] { x + 1, y },

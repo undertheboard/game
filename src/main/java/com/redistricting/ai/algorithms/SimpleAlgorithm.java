@@ -120,7 +120,59 @@ public final class SimpleAlgorithm implements RedistrictingAlgorithm {
         }
 
         GeographyUtils.repairContiguity(assignment, adj, D, 4);
+
+        // Population balancing pass: nudge precincts across district boundaries
+        // until every district is within the requested tolerance, while
+        // preserving contiguity. Cheap on small bases, bounded for safety.
+        rebalancePopulations(assignment, base, params, D, idealPop);
+        GeographyUtils.repairContiguity(assignment, adj, D, 4);
         return assignment;
+    }
+
+    /**
+     * Greedy boundary transfers from over-populated districts to
+     * under-populated neighbours, with a per-pass move cap and a hard
+     * iteration ceiling so that we always terminate.
+     */
+    private static void rebalancePopulations(int[] assignment, PrecinctBase base,
+                                             GenerationParams params, int D,
+                                             double idealPop) {
+        int[][] adj = base.adjacency();
+        List<Precinct> precincts = base.precincts();
+        double tol = Math.max(0.005, params.populationTolerance());
+
+        for (int pass = 0; pass < 400; pass++) {
+            long[] pop = new long[D];
+            int[] count = new int[D];
+            for (int i = 0; i < precincts.size(); i++) {
+                pop[assignment[i]] += precincts.get(i).population();
+                count[assignment[i]]++;
+            }
+            int over = -1, under = -1;
+            double devOver = 0, devUnder = 0;
+            for (int d = 0; d < D; d++) {
+                double dev = (pop[d] - idealPop) / idealPop;
+                if (dev > devOver)  { devOver = dev;  over  = d; }
+                if (-dev > devUnder) { devUnder = -dev; under = d; }
+            }
+            if (over == -1 || under == -1) return;
+            if (devOver <= tol && devUnder <= tol) return;
+            if (count[over] <= 1) return;
+
+            int donor = -1;
+            int donorPop = Integer.MAX_VALUE;
+            for (int i = 0; i < assignment.length; i++) {
+                if (assignment[i] != over) continue;
+                boolean touchesUnder = false;
+                for (int nb : adj[i]) if (assignment[nb] == under) { touchesUnder = true; break; }
+                if (!touchesUnder) continue;
+                if (!GeographyUtils.wouldStayConnectedWithout(i, assignment, adj)) continue;
+                int p = precincts.get(i).population();
+                if (p < donorPop) { donorPop = p; donor = i; }
+            }
+            if (donor == -1) return;
+            assignment[donor] = under;
+        }
     }
 
     private static void absorb(int d, int idx, List<Precinct> precincts,
