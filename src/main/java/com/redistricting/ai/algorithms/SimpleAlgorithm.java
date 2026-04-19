@@ -2,9 +2,9 @@ package com.redistricting.ai.algorithms;
 
 import com.redistricting.ai.GenerationParams;
 import com.redistricting.model.Precinct;
-import com.redistricting.model.RedistrictingMap;
 
-import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
@@ -14,22 +14,21 @@ import java.util.Set;
  * <strong>Simple</strong> redistricting algorithm.
  *
  * <p><em>Goal:</em> produce a clean, contiguous map with roughly equal
- * district populations as quickly as possible, using only the few knobs a
- * casual user cares about (district count, grid size, seed).
+ * district populations as quickly as possible. Suited to the "Simple" UI
+ * mode where the user only picks the number of districts and a seed.
  *
  * <p><em>Method:</em> multi-source BFS region growing.
  * <ol>
- *   <li>Pick {@code D} seed precincts via k-means++ farthest-first sampling
- *       so seeds are well spread across the grid.</li>
+ *   <li>Pick {@code D} seed precincts via k-means++ farthest-first sampling.</li>
  *   <li>Repeat: find the district that is currently the most under its
  *       ideal population share <em>and</em> still has frontier precincts;
  *       absorb the neighbouring frontier precinct closest to that
  *       district's centroid.</li>
- *   <li>If any unassigned precincts remain (e.g. an island created by a
- *       narrow corridor), give them to the smallest neighbouring district
- *       reachable by BFS.</li>
+ *   <li>If any unassigned precincts remain (rare; can happen on irregular
+ *       precinct topology), give them to the smallest neighbouring
+ *       district reachable by BFS.</li>
  *   <li>Final {@link GeographyUtils#repairContiguity contiguity repair}
- *       pass guarantees every district is a single connected component.</li>
+ *       guarantees every district is a single connected component.</li>
  * </ol>
  *
  * <p>The simple algorithm intentionally <em>ignores</em> the partisan,
@@ -47,40 +46,38 @@ public final class SimpleAlgorithm implements RedistrictingAlgorithm {
     }
 
     @Override
-    public RedistrictingMap generate(GenerationParams params) {
-        long seed = params.seed();
-        List<Precinct> precincts = GeographyUtils.buildPrecincts(params, seed);
-        int[] county = GeographyUtils.countyOf(params);
-        int[][] adj = GeographyUtils.gridAdjacency(params.precinctsX(), params.precinctsY());
-
+    public int[] assign(PrecinctBase base, GenerationParams params) {
+        List<Precinct> precincts = base.precincts();
+        int[][] adj = base.adjacency();
         int n = precincts.size();
         int D = params.districts();
+        if (D > n) {
+            throw new IllegalArgumentException(
+                    "districts (" + D + ") exceeds precinct count (" + n + ")");
+        }
+
+        Random rng = new Random(params.seed());
+        int[] seeds = GeographyUtils.kmeansPlusPlusSeeds(D, n,
+                /*nx — only used for synthetic ordering*/ Math.max(1, params.precinctsX()),
+                base.county(), 0.0, rng);
+
         int[] assignment = new int[n];
         for (int i = 0; i < n; i++) assignment[i] = -1;
 
-        Random rng = new Random(seed);
-        int[] seeds = GeographyUtils.kmeansPlusPlusSeeds(D, n, params.precinctsX(),
-                county, /*countyAdherence*/ 0.0, rng);
-
-        int[] districtPop = new int[D];
+        long[] districtPop = new long[D];
         double[] cxSum = new double[D];
         double[] cySum = new double[D];
         @SuppressWarnings("unchecked")
         Set<Integer>[] frontier = new Set[D];
         for (int d = 0; d < D; d++) frontier[d] = new HashSet<>();
 
-        long totalPop = 0;
-        for (Precinct p : precincts) totalPop += p.population();
+        long totalPop = base.totalPopulation();
         double idealPop = (double) totalPop / D;
 
         for (int d = 0; d < D; d++) {
             int idx = seeds[d];
             assignment[idx] = d;
-            Precinct p = precincts.get(idx);
-            districtPop[d] += p.population();
-            double[] c = p.centroid();
-            cxSum[d] += c[0] * p.population();
-            cySum[d] += c[1] * p.population();
+            absorb(d, idx, precincts, districtPop, cxSum, cySum);
             for (int nb : adj[idx]) if (assignment[nb] == -1) frontier[d].add(nb);
         }
 
@@ -106,11 +103,7 @@ public final class SimpleAlgorithm implements RedistrictingAlgorithm {
                 if (d2 < bestDist) { bestDist = d2; picked = idx; }
             }
             assignment[picked] = chosen;
-            Precinct p = precincts.get(picked);
-            districtPop[chosen] += p.population();
-            double[] c = p.centroid();
-            cxSum[chosen] += c[0] * p.population();
-            cySum[chosen] += c[1] * p.population();
+            absorb(chosen, picked, precincts, districtPop, cxSum, cySum);
             for (Set<Integer> f : frontier) f.remove(picked);
             for (int nb : adj[picked]) {
                 if (assignment[nb] == -1) frontier[chosen].add(nb);
@@ -118,7 +111,7 @@ public final class SimpleAlgorithm implements RedistrictingAlgorithm {
             remaining--;
         }
 
-        // Sweep up any orphan precincts.
+        // Sweep up any unreachable orphan precincts.
         for (int i = 0; i < n; i++) {
             if (assignment[i] != -1) continue;
             int target = nearestAssignedDistrict(i, adj, assignment);
@@ -127,21 +120,20 @@ public final class SimpleAlgorithm implements RedistrictingAlgorithm {
         }
 
         GeographyUtils.repairContiguity(assignment, adj, D, 4);
+        return assignment;
+    }
 
-        // Apply assignments to precincts.
-        List<Precinct> finalPrecincts = new ArrayList<>(precincts.size());
-        for (int i = 0; i < precincts.size(); i++) {
-            Precinct old = precincts.get(i);
-            Precinct copy = new Precinct(old.id(), assignment[i], old.population(),
-                    old.demVotes(), old.repVotes(), old.rings());
-            finalPrecincts.add(copy);
-        }
-        return new RedistrictingMap(
-                "Generated Plan (Simple, equal-pop)", D, finalPrecincts);
+    private static void absorb(int d, int idx, List<Precinct> precincts,
+                               long[] pop, double[] cxSum, double[] cySum) {
+        Precinct p = precincts.get(idx);
+        pop[d] += p.population();
+        double[] c = p.centroid();
+        cxSum[d] += c[0] * p.population();
+        cySum[d] += c[1] * p.population();
     }
 
     private static int nearestAssignedDistrict(int start, int[][] adj, int[] assignment) {
-        java.util.Deque<Integer> q = new java.util.ArrayDeque<>();
+        Deque<Integer> q = new ArrayDeque<>();
         boolean[] seen = new boolean[assignment.length];
         q.add(start);
         seen[start] = true;

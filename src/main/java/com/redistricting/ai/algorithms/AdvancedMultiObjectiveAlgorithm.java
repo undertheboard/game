@@ -2,9 +2,9 @@ package com.redistricting.ai.algorithms;
 
 import com.redistricting.ai.GenerationParams;
 import com.redistricting.model.Precinct;
-import com.redistricting.model.RedistrictingMap;
 
-import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
@@ -13,9 +13,10 @@ import java.util.Set;
 /**
  * <strong>Advanced multi-objective</strong> redistricting algorithm.
  *
- * <p><em>Goal:</em> a high-quality general-purpose plan that balances
+ * <p><em>Goal:</em> a high-quality general-purpose plan balancing
  * <strong>all</strong> the objectives the user can configure: population
- * equality, partisan target, county adherence and geometric compactness.
+ * equality, partisan target (from the bias slider), county adherence and
+ * geometric compactness.
  *
  * <p><em>Method:</em>
  * <ol>
@@ -24,8 +25,8 @@ import java.util.Set;
  *       attempt seeds the districts using k-means++ farthest-first sampling
  *       (county-aware when {@code countyAdherence > 0.5}) and grows them
  *       greedily under a weighted cost combining population deviation,
- *       partisan-share deviation, county-split penalty and centroid-distance
- *       compactness.</li>
+ *       partisan-share deviation, county-split penalty and centroid
+ *       distance.</li>
  *   <li><strong>Contiguity repair.</strong> Re-attach any disconnected
  *       island to its strongest neighbouring district.</li>
  *   <li><strong>Boundary local search.</strong> Polish with
@@ -33,7 +34,7 @@ import java.util.Set;
  *       reduce the same multi-objective score, while preserving
  *       contiguity.</li>
  *   <li><strong>Best-of selection.</strong> Keep the attempt with the
- *       lowest combined score, breaking ties on the partisan seat-gap.</li>
+ *       lowest combined score, breaking ties on partisan seat-gap.</li>
  * </ol>
  */
 public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgorithm {
@@ -42,71 +43,65 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
     @Override public String displayName() { return "Advanced — multi-objective"; }
     @Override public String description() {
         return "Greedy seeded growth with a weighted cost (population, partisan target, "
-             + "county adherence, compactness), followed by a boundary local-search "
-             + "polish pass and contiguity repair. Runs N independent attempts and "
-             + "keeps the best.";
+             + "county adherence, compactness), followed by contiguity repair and a "
+             + "boundary local-search polish pass. Runs N attempts and keeps the best.";
     }
 
     @Override
-    public RedistrictingMap generate(GenerationParams params) {
+    public int[] assign(PrecinctBase base, GenerationParams params) {
         Random masterRng = new Random(params.seed());
         int targetDemSeats = targetDemSeats(params.partisanBias(), params.districts());
 
         int[] bestAssignment = null;
-        List<Precinct> bestPrecincts = null;
         double bestScore = Double.POSITIVE_INFINITY;
         int bestSeatGap = Integer.MAX_VALUE;
 
+        BoundaryRefiner.Objective obj = makeObjective(base, params, targetDemSeats);
+
         for (int attempt = 0; attempt < params.attempts(); attempt++) {
             long attemptSeed = masterRng.nextLong();
-            List<Precinct> precincts = GeographyUtils.buildPrecincts(params, attemptSeed);
-            int[] county = GeographyUtils.countyOf(params);
-            int counties = params.countiesX() * params.countiesY();
-            int[][] adj = GeographyUtils.gridAdjacency(params.precinctsX(), params.precinctsY());
+            int[] assignment = grow(base, params, attemptSeed, targetDemSeats);
+            GeographyUtils.repairContiguity(assignment, base.adjacency(),
+                    params.districts(), 4);
 
-            int[] assignment = grow(precincts, county, adj, params, attemptSeed,
-                    targetDemSeats);
-            GeographyUtils.repairContiguity(assignment, adj, params.districts(), 4);
+            BoundaryRefiner.refine(assignment, params.districts(), base.precincts(),
+                    base.county(), base.counties(), base.adjacency(),
+                    obj, /*passes*/ 8, new Random(attemptSeed ^ 0xCAFE));
+            GeographyUtils.repairContiguity(assignment, base.adjacency(),
+                    params.districts(), 4);
 
-            BoundaryRefiner.Objective obj = makeObjective(precincts, params, targetDemSeats);
-            BoundaryRefiner.refine(assignment, params.districts(), precincts, county,
-                    counties, adj, obj, /*passes*/ 8, new Random(attemptSeed ^ 0xCAFE));
-            GeographyUtils.repairContiguity(assignment, adj, params.districts(), 4);
-
-            BoundaryRefiner.Stats finalStats = BoundaryRefiner.statsOf(
-                    assignment, params.districts(), precincts, county, counties);
-            double score = obj.score(finalStats, params.districts());
-            int seatGap = Math.abs(countDemSeats(finalStats, params.districts()) - targetDemSeats);
-
-            if (score < bestScore || (Math.abs(score - bestScore) < 1e-9 && seatGap < bestSeatGap)) {
+            BoundaryRefiner.Stats stats = BoundaryRefiner.statsOf(assignment,
+                    params.districts(), base.precincts(), base.county(), base.counties());
+            double score = obj.score(stats, params.districts());
+            int seatGap = Math.abs(countDemSeats(stats, params.districts()) - targetDemSeats);
+            if (score < bestScore - 1e-9
+                    || (Math.abs(score - bestScore) <= 1e-9 && seatGap < bestSeatGap)) {
                 bestScore = score;
                 bestSeatGap = seatGap;
                 bestAssignment = assignment;
-                bestPrecincts = precincts;
             }
         }
-
-        return materialise(bestPrecincts, bestAssignment, params,
-                "Generated Plan (Advanced, bias " + GeographyUtils.signedBias(params.partisanBias()) + ")");
+        return bestAssignment;
     }
 
     // ---------- growth ----------
 
-    private int[] grow(List<Precinct> precincts, int[] county, int[][] adj,
-                       GenerationParams p, long seed, int targetDemSeats) {
+    private int[] grow(PrecinctBase base, GenerationParams p, long seed, int targetDemSeats) {
         Random rng = new Random(seed);
+        List<Precinct> precincts = base.precincts();
+        int[][] adj = base.adjacency();
+        int[] county = base.county();
         int n = precincts.size();
         int D = p.districts();
-        long totalPop = 0;
-        for (Precinct pr : precincts) totalPop += pr.population();
+        long totalPop = base.totalPopulation();
         double idealPop = (double) totalPop / D;
 
         int[] assignment = new int[n];
         for (int i = 0; i < n; i++) assignment[i] = -1;
 
-        int[] districtPop = new int[D];
-        int[] districtDem = new int[D];
-        int[] districtRep = new int[D];
+        long[] districtPop = new long[D];
+        long[] districtDem = new long[D];
+        long[] districtRep = new long[D];
         double[] cxSum = new double[D];
         double[] cySum = new double[D];
         @SuppressWarnings("unchecked")
@@ -120,12 +115,11 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
 
         double[] targetDemShare = new double[D];
         for (int d = 0; d < D; d++) {
-            // Winning Dem districts aim a bit above 50%; losing ones get packed low.
             targetDemShare[d] = (d < targetDemSeats) ? 0.55 : 0.35;
         }
 
-        int[] seeds = GeographyUtils.kmeansPlusPlusSeeds(D, n, p.precinctsX(), county,
-                p.countyAdherence(), rng);
+        int[] seeds = GeographyUtils.kmeansPlusPlusSeeds(D, n,
+                Math.max(1, p.precinctsX()), county, p.countyAdherence(), rng);
         for (int d = 0; d < D; d++) {
             int idx = seeds[d];
             assignment[idx] = d;
@@ -147,10 +141,10 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
 
             int picked = bestCandidate(chosenD, frontier[chosenD], precincts, county,
                     districtPop, districtDem, districtRep, cxSum, cySum,
-                    districtCounties, targetDemShare, idealPop, p);
+                    districtCounties, targetDemShare, idealPop, p, n);
             assignment[picked] = chosenD;
-            recordAdd(chosenD, picked, precincts, county, districtPop, districtDem, districtRep,
-                    cxSum, cySum, districtCounties);
+            recordAdd(chosenD, picked, precincts, county, districtPop, districtDem,
+                    districtRep, cxSum, cySum, districtCounties);
             for (Set<Integer> f : frontier) f.remove(picked);
             for (int nb : adj[picked]) {
                 if (assignment[nb] == -1) frontier[chosenD].add(nb);
@@ -171,19 +165,19 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
     }
 
     private int bestCandidate(int d, Set<Integer> frontier, List<Precinct> precincts,
-                              int[] county, int[] districtPop, int[] districtDem,
-                              int[] districtRep, double[] cxSum, double[] cySum,
+                              int[] county, long[] districtPop, long[] districtDem,
+                              long[] districtRep, double[] cxSum, double[] cySum,
                               Set<Integer>[] districtCounties, double[] targetDemShare,
-                              double idealPop, GenerationParams p) {
+                              double idealPop, GenerationParams p, int n) {
         int best = -1;
         double bestCost = Double.POSITIVE_INFINITY;
         double cx = districtPop[d] == 0 ? 0 : cxSum[d] / districtPop[d];
         double cy = districtPop[d] == 0 ? 0 : cySum[d] / districtPop[d];
         for (int idx : frontier) {
             Precinct pr = precincts.get(idx);
-            int newPop = districtPop[d] + pr.population();
-            int newDem = districtDem[d] + pr.demVotes();
-            int newRep = districtRep[d] + pr.repVotes();
+            long newPop = districtPop[d] + pr.population();
+            long newDem = districtDem[d] + pr.demVotes();
+            long newRep = districtRep[d] + pr.repVotes();
             double demShare = (newDem + newRep) == 0 ? 0.5
                     : (double) newDem / (newDem + newRep);
             double[] c = pr.centroid();
@@ -191,7 +185,6 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
             double popPenalty = Math.abs(newPop - idealPop) / idealPop;
             double leanPenalty = Math.abs(demShare - targetDemShare[d]);
             double countyPenalty = districtCounties[d].contains(county[idx]) ? 0.0 : 1.0;
-            double n = (double) precincts.size();
             double dist = Math.hypot(c[0] - cx, c[1] - cy) / Math.sqrt(n);
 
             double cost = popPenalty
@@ -199,8 +192,6 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
                     + p.countyAdherence() * countyPenalty
                     + p.compactness() * dist;
 
-            // Hard guard: penalise overshooting the population tolerance while
-            // any other district is still under-target.
             if (newPop > idealPop * (1 + p.populationTolerance())
                     && hasUnderfilledOther(d, districtPop, idealPop, p)) {
                 cost += 100;
@@ -210,7 +201,7 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
         return best;
     }
 
-    private boolean hasUnderfilledOther(int d, int[] districtPop,
+    private boolean hasUnderfilledOther(int d, long[] districtPop,
                                         double ideal, GenerationParams p) {
         for (int i = 0; i < districtPop.length; i++) {
             if (i == d) continue;
@@ -220,7 +211,7 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
     }
 
     private void recordAdd(int d, int idx, List<Precinct> precincts, int[] county,
-                           int[] districtPop, int[] districtDem, int[] districtRep,
+                           long[] districtPop, long[] districtDem, long[] districtRep,
                            double[] cxSum, double[] cySum,
                            Set<Integer>[] districtCounties) {
         Precinct pr = precincts.get(idx);
@@ -234,7 +225,7 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
     }
 
     private static int nearestAssignedDistrict(int start, int[][] adj, int[] assignment) {
-        java.util.Deque<Integer> q = new java.util.ArrayDeque<>();
+        Deque<Integer> q = new ArrayDeque<>();
         boolean[] seen = new boolean[assignment.length];
         q.add(start); seen[start] = true;
         while (!q.isEmpty()) {
@@ -249,17 +240,9 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
 
     // ---------- objective + helpers ----------
 
-    /**
-     * Build the lower-is-better objective used both for selecting the best
-     * attempt and for driving the boundary refiner. Combines normalised
-     * population deviation, partisan seat-gap, county splits and centroid
-     * spread.
-     */
-    static BoundaryRefiner.Objective makeObjective(List<Precinct> precincts,
-                                                    GenerationParams p,
+    static BoundaryRefiner.Objective makeObjective(PrecinctBase base, GenerationParams p,
                                                     int targetDemSeats) {
-        long totalPop = 0;
-        for (Precinct pr : precincts) totalPop += pr.population();
+        long totalPop = base.totalPopulation();
         final double idealPop = (double) totalPop / p.districts();
         return (s, D) -> {
             double popDev = 0;
@@ -277,9 +260,6 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
             }
             countySplits /= Math.max(1, D);
 
-            // Compactness is steered by the growth heuristic and by the
-            // contiguity-preserving constraint of the boundary refiner; it
-            // doesn't need an explicit term in this scalar score.
             return popDev
                  + 1.5 * seatGap
                  + p.countyAdherence() * countySplits;
@@ -297,16 +277,5 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
         double frac = 0.5 + (bias / 100.0) * 0.5;
         int seats = (int) Math.round(frac * districts);
         return Math.max(0, Math.min(districts, seats));
-    }
-
-    static RedistrictingMap materialise(List<Precinct> precincts, int[] assignment,
-                                         GenerationParams params, String name) {
-        List<Precinct> finalPrecincts = new ArrayList<>(precincts.size());
-        for (int i = 0; i < precincts.size(); i++) {
-            Precinct old = precincts.get(i);
-            finalPrecincts.add(new Precinct(old.id(), assignment[i], old.population(),
-                    old.demVotes(), old.repVotes(), old.rings()));
-        }
-        return new RedistrictingMap(name, params.districts(), finalPrecincts);
     }
 }

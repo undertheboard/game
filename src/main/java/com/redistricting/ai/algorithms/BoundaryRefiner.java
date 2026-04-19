@@ -23,17 +23,17 @@ public final class BoundaryRefiner {
 
     /** Per-district running stats — populated and updated by the refiner. */
     public static final class Stats {
-        public final int[] pop;
-        public final int[] dem;
-        public final int[] rep;
+        public final long[] pop;
+        public final long[] dem;
+        public final long[] rep;
         public final int[][] countyMembership; // [district][countyId] = #precincts in that county
         public final double[] cxSum; // weighted by population
         public final double[] cySum;
 
         public Stats(int districts, int counties) {
-            this.pop = new int[districts];
-            this.dem = new int[districts];
-            this.rep = new int[districts];
+            this.pop = new long[districts];
+            this.dem = new long[districts];
+            this.rep = new long[districts];
             this.countyMembership = new int[districts][counties];
             this.cxSum = new double[districts];
             this.cySum = new double[districts];

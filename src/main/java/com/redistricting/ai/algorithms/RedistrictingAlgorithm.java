@@ -1,19 +1,18 @@
 package com.redistricting.ai.algorithms;
 
 import com.redistricting.ai.GenerationParams;
-import com.redistricting.model.RedistrictingMap;
 
 /**
- * Strategy interface for generating a complete redistricting plan.
+ * Strategy interface for assigning precincts to districts.
  *
  * <p>Implementations are responsible for:
  * <ol>
- *   <li>Building (or accepting) a precinct grid sized by {@link GenerationParams}.</li>
+ *   <li>Accepting a {@link PrecinctBase} (real precincts loaded from the
+ *       Redistricting Data Hub, or a synthetic grid for demos/tests).</li>
  *   <li>Assigning every precinct to exactly one of the requested districts.</li>
- *   <li>Producing a {@link RedistrictingMap} whose districts are
- *       <em>contiguous</em> (every district is a single connected component
- *       under rook adjacency) and within the configured population
- *       tolerance whenever feasible.</li>
+ *   <li>Returning an assignment whose districts are <em>contiguous</em>
+ *       under {@link PrecinctBase#adjacency()} and within the configured
+ *       population tolerance whenever feasible.</li>
  * </ol>
  *
  * <p>Algorithms differ in their <strong>goals</strong>: some optimise for
@@ -38,9 +37,13 @@ public interface RedistrictingAlgorithm {
     /**
      * Run the algorithm.
      *
+     * @param base   the precinct substrate (real RDH precincts or synthetic).
      * @param params validated parameters; algorithms must respect at least
-     *               {@code districts}, the precinct grid, and {@code seed}.
-     * @return a fully assigned, contiguous redistricting plan.
+     *               {@code districts} and {@code seed}. The synthetic-grid
+     *               sizing fields are ignored when {@code base} was loaded
+     *               from real data.
+     * @return per-precinct district assignment ({@code [0, districts)}),
+     *         parallel to {@code base.precincts()}.
      */
-    RedistrictingMap generate(GenerationParams params);
+    int[] assign(PrecinctBase base, GenerationParams params);
 }
