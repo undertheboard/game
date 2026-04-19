@@ -5,8 +5,10 @@ import com.redistricting.model.Precinct;
 import com.redistricting.model.RedistrictingMap;
 
 import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 import java.awt.BasicStroke;
 import java.awt.Color;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
@@ -18,35 +20,50 @@ import java.awt.event.MouseWheelEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
- * A pannable / zoomable Swing canvas that draws a {@link RedistrictingMap}.
+ * Pannable / zoomable Swing canvas that draws and (optionally) edits a
+ * {@link RedistrictingMap}.
  *
- * <p>Three independent view toggles are exposed:
+ * <p>Four colouring modes are exposed:
  * <ul>
- *   <li>{@link ViewMode#DISTRICT} colours each precinct by its district id
- *       (default), or {@link ViewMode#PARTISAN_LEAN} shades it from deep
- *       red (Republican) through grey (50/50) to deep blue (Democratic)
- *       based on the precinct or district Dem-share.</li>
- *   <li>{@link #setShowPrecinctLines(boolean)} draws thin outlines around
- *       every precinct (helpful for inspecting boundaries) — toggle off for
- *       a cleaner display.</li>
- *   <li>{@link #setShowDistrictNumbers(boolean)} stamps each district's
- *       1-based number at its population-weighted centroid.</li>
+ *   <li>{@link ViewMode#DISTRICT} — colour each precinct by its district id
+ *       using a perceptually-distinct palette.</li>
+ *   <li>{@link ViewMode#DISTRICT_WHOLE} — same palette but precinct outlines
+ *       are dropped so each district reads as a single solid block.</li>
+ *   <li>{@link ViewMode#PARTISAN_LEAN} — shade each precinct from deep red
+ *       (Republican) through near-white (50/50) to deep blue (Democratic)
+ *       using a high-resolution multi-stop diverging gradient with a mild
+ *       sigmoid spread, so the map shows far more shades than a simple
+ *       three-stop blend.</li>
+ *   <li>{@link ViewMode#PARTISAN_LEAN_DISTRICT} — colour every precinct in a
+ *       district with the district-aggregate lean.</li>
  * </ul>
  *
- * <p>Tooltips expose precinct details. Drag to pan, scroll to zoom.
+ * <p>When {@link #setEditMode(boolean) edit mode} is on, click / drag paints
+ * the precincts under the cursor (within {@link #setBrushSize(int) brush
+ * radius pixels}) into the {@link #setActiveDistrict(int) active district}.
+ * Edits are recorded onto an undo stack — {@link #undo()} / {@link #redo()}
+ * roll a whole stroke back or forward.
+ *
+ * <p>Tooltips expose precinct details. Drag (when not editing) to pan,
+ * scroll wheel to zoom about the cursor.
  */
 public final class MapPanel extends JPanel {
 
     /** Colouring scheme for the map fill. */
-    public enum ViewMode { DISTRICT, PARTISAN_LEAN }
+    public enum ViewMode {
+        DISTRICT, DISTRICT_WHOLE, PARTISAN_LEAN, PARTISAN_LEAN_DISTRICT
+    }
 
     private RedistrictingMap map;
     private double scale = 1.0;
@@ -59,6 +76,23 @@ public final class MapPanel extends JPanel {
     private boolean showDistrictLines = true;
     private boolean showDistrictNumbers = true;
     private boolean dark = false;
+
+    // ---- editing state ---------------------------------------------------
+    private boolean editMode = false;
+    private int activeDistrict = 0;
+    /** Brush radius in screen pixels (0 = exactly one precinct under the cursor). */
+    private int brushSize = 0;
+    private int cursorX = -1, cursorY = -1;
+    private boolean cursorInside = false;
+
+    /** Undo/redo stacks of completed strokes. Each stroke is a precinctId → previousDistrict map. */
+    private final Deque<Map<String, Integer>> undoStack = new ArrayDeque<>();
+    private final Deque<Map<String, Integer>> redoStack = new ArrayDeque<>();
+    /** The stroke currently in progress (mouse pressed → released). */
+    private Map<String, Integer> currentStroke;
+
+    /** Listener fired when the precinct → district assignment changes. */
+    private Consumer<RedistrictingMap> changeListener;
 
     /** Pre-computed boundary segments between precincts of different districts. */
     private List<double[]> districtBoundary; // each entry: {x1,y1,x2,y2}
@@ -74,13 +108,42 @@ public final class MapPanel extends JPanel {
             @Override public void mousePressed(MouseEvent e) {
                 lastDragX = e.getX();
                 lastDragY = e.getY();
+                if (editMode && SwingUtilities.isLeftMouseButton(e)) {
+                    currentStroke = new HashMap<>();
+                    paintAt(e.getX(), e.getY());
+                }
             }
             @Override public void mouseDragged(MouseEvent e) {
+                cursorX = e.getX(); cursorY = e.getY(); cursorInside = true;
+                if (editMode && SwingUtilities.isLeftMouseButton(e)) {
+                    paintAt(e.getX(), e.getY());
+                    repaint();
+                    return;
+                }
                 offsetX += e.getX() - lastDragX;
                 offsetY += e.getY() - lastDragY;
                 lastDragX = e.getX();
                 lastDragY = e.getY();
                 repaint();
+            }
+            @Override public void mouseReleased(MouseEvent e) {
+                if (editMode && currentStroke != null) {
+                    if (!currentStroke.isEmpty()) {
+                        undoStack.push(currentStroke);
+                        redoStack.clear();
+                        fireChange();
+                    }
+                    currentStroke = null;
+                }
+            }
+            @Override public void mouseMoved(MouseEvent e) {
+                cursorX = e.getX(); cursorY = e.getY(); cursorInside = true;
+                if (editMode) repaint();
+            }
+            @Override public void mouseEntered(MouseEvent e) { cursorInside = true; }
+            @Override public void mouseExited(MouseEvent e) {
+                cursorInside = false;
+                if (editMode) repaint();
             }
             @Override public void mouseWheelMoved(MouseWheelEvent e) {
                 double factor = Math.pow(1.1, -e.getPreciseWheelRotation());
@@ -104,8 +167,10 @@ public final class MapPanel extends JPanel {
     public void setMap(RedistrictingMap map) {
         this.map = map;
         this.bbox = computeBbox(map);
-        this.districtBoundary = computeDistrictBoundary(map);
-        this.districtCentroid = computeDistrictCentroids(map);
+        rebuildDerived();
+        undoStack.clear();
+        redoStack.clear();
+        if (activeDistrict >= map.districtCount()) activeDistrict = 0;
         resetView();
         repaint();
     }
@@ -130,6 +195,109 @@ public final class MapPanel extends JPanel {
     public boolean isShowDistrictNumbers() { return showDistrictNumbers; }
     public void setShowDistrictNumbers(boolean v) {
         if (v != showDistrictNumbers) { showDistrictNumbers = v; repaint(); }
+    }
+
+    // ---- editing API -----------------------------------------------------
+
+    public boolean isEditMode() { return editMode; }
+    public void setEditMode(boolean v) {
+        if (v == editMode) return;
+        editMode = v;
+        setCursor(Cursor.getPredefinedCursor(v ? Cursor.CROSSHAIR_CURSOR : Cursor.DEFAULT_CURSOR));
+        repaint();
+    }
+
+    public int getActiveDistrict() { return activeDistrict; }
+    public void setActiveDistrict(int d) {
+        if (map == null) { activeDistrict = Math.max(0, d); return; }
+        activeDistrict = Math.max(0, Math.min(map.districtCount() - 1, d));
+        repaint();
+    }
+
+    public int getBrushSize() { return brushSize; }
+    public void setBrushSize(int px) {
+        brushSize = Math.max(0, px);
+        if (editMode) repaint();
+    }
+
+    public boolean canUndo() { return !undoStack.isEmpty(); }
+    public boolean canRedo() { return !redoStack.isEmpty(); }
+
+    public void undo() { swap(undoStack, redoStack); }
+    public void redo() { swap(redoStack, undoStack); }
+
+    private void swap(Deque<Map<String, Integer>> from, Deque<Map<String, Integer>> to) {
+        if (map == null || from.isEmpty()) return;
+        Map<String, Integer> stroke = from.pop();
+        Map<String, Integer> reverse = new HashMap<>();
+        Map<String, Precinct> byId = new HashMap<>();
+        for (Precinct p : map.precincts()) byId.put(p.id(), p);
+        for (Map.Entry<String, Integer> e : stroke.entrySet()) {
+            Precinct p = byId.get(e.getKey());
+            if (p == null) continue;
+            reverse.put(p.id(), p.district());
+            p.setDistrict(e.getValue());
+        }
+        to.push(reverse);
+        rebuildDerived();
+        repaint();
+        fireChange();
+    }
+
+    /** Listener fired whenever a paint stroke (or undo/redo) changes assignments. */
+    public void setChangeListener(Consumer<RedistrictingMap> l) { this.changeListener = l; }
+
+    private void fireChange() {
+        if (changeListener != null && map != null) changeListener.accept(map);
+    }
+
+    /**
+     * Paint at screen pixel (sx, sy): every precinct whose centroid (or any
+     * vertex within brush radius) falls under the brush is reassigned to the
+     * active district. Records the previous assignment in {@code currentStroke}
+     * so the move can be undone as a single unit.
+     */
+    private void paintAt(int sx, int sy) {
+        if (map == null || currentStroke == null) return;
+        // World-space brush radius.
+        double r = brushSize / Math.max(1e-9, scale);
+        double mx = (sx - offsetX) / scale;
+        double my = -(sy - offsetY) / scale;
+        boolean changed = false;
+        for (Precinct p : map.precincts()) {
+            if (p.district() == activeDistrict) continue;
+            if (!precinctTouches(p, mx, my, r)) continue;
+            currentStroke.putIfAbsent(p.id(), p.district());
+            p.setDistrict(activeDistrict);
+            changed = true;
+        }
+        if (changed) rebuildDerived();
+    }
+
+    private static boolean precinctTouches(Precinct p, double mx, double my, double r) {
+        // Fast path: brush radius 0 → require point-in-polygon.
+        if (r <= 0) {
+            for (List<double[]> ring : p.rings()) {
+                if (pointInRing(mx, my, ring)) return true;
+            }
+            return false;
+        }
+        double r2 = r * r;
+        for (List<double[]> ring : p.rings()) {
+            // Quick: any vertex within radius?
+            for (double[] v : ring) {
+                double dx = v[0] - mx, dy = v[1] - my;
+                if (dx * dx + dy * dy <= r2) return true;
+            }
+            // Or cursor inside the ring at all (e.g. brush smaller than precinct).
+            if (pointInRing(mx, my, ring)) return true;
+        }
+        return false;
+    }
+
+    private void rebuildDerived() {
+        this.districtBoundary = computeDistrictBoundary(map);
+        this.districtCentroid = computeDistrictCentroids(map);
     }
 
     public void resetView() {
@@ -188,18 +356,29 @@ public final class MapPanel extends JPanel {
         // Pre-compute per-district lean for the partisan view.
         double[] districtLean = districtLeans(map);
 
+        boolean wholeDistrict = (viewMode == ViewMode.DISTRICT_WHOLE
+                || viewMode == ViewMode.PARTISAN_LEAN_DISTRICT);
+
         // Fill precincts.
         for (Precinct p : map.precincts()) {
-            Color fill = (viewMode == ViewMode.PARTISAN_LEAN)
-                    ? leanColor(precinctLean(p, districtLean), dark)
-                    : palette[Math.floorMod(p.district(), palette.length)];
+            Color fill;
+            switch (viewMode) {
+                case PARTISAN_LEAN ->
+                    fill = leanColor(precinctLean(p, districtLean), dark);
+                case PARTISAN_LEAN_DISTRICT ->
+                    fill = leanColor(safeLean(districtLean, p.district()), dark);
+                case DISTRICT_WHOLE, DISTRICT ->
+                    fill = palette[Math.floorMod(p.district(), palette.length)];
+                default -> fill = palette[0];
+            }
             g2.setColor(fill);
             Path2D.Double path = polyPath(p);
             g2.fill(path.createTransformedShape(t));
         }
 
-        // Optional thin precinct outlines.
-        if (showPrecinctLines) {
+        // Optional thin precinct outlines (suppressed in whole-district modes
+        // unless the user has explicitly turned them back on).
+        if (showPrecinctLines && !wholeDistrict) {
             g2.setStroke(new BasicStroke(0.5f));
             g2.setColor(dark ? new Color(255, 255, 255, 60) : new Color(0, 0, 0, 80));
             for (Precinct p : map.precincts()) {
@@ -208,9 +387,9 @@ public final class MapPanel extends JPanel {
             }
         }
 
-        // District boundaries — thicker, contrasting; toggleable from View menu.
+        // District boundaries — thicker, contrasting; toggleable from the toolbar.
         if (showDistrictLines) {
-            g2.setStroke(new BasicStroke(1.8f));
+            g2.setStroke(new BasicStroke(wholeDistrict ? 2.4f : 1.8f));
             g2.setColor(dark ? DarkTheme.MAP_BOUNDARY : Color.BLACK);
             if (districtBoundary != null) {
                 for (double[] seg : districtBoundary) {
@@ -236,7 +415,27 @@ public final class MapPanel extends JPanel {
         }
 
         drawLegend(g2, palette, districtLean);
+        drawBrushOverlay(g2, palette);
         g2.dispose();
+    }
+
+    private void drawBrushOverlay(Graphics2D g2, Color[] palette) {
+        if (!editMode || !cursorInside || map == null) return;
+        Color ring = palette[Math.floorMod(activeDistrict, palette.length)];
+        g2.setStroke(new BasicStroke(2f));
+        // Crosshair / brush radius.
+        int r = Math.max(brushSize, 6);
+        g2.setColor(new Color(ring.getRed(), ring.getGreen(), ring.getBlue(), 200));
+        g2.drawOval(cursorX - r, cursorY - r, r * 2, r * 2);
+        if (brushSize > 0) {
+            g2.setColor(new Color(ring.getRed(), ring.getGreen(), ring.getBlue(), 60));
+            g2.fillOval(cursorX - brushSize, cursorY - brushSize,
+                    brushSize * 2, brushSize * 2);
+        }
+        // "D#" badge.
+        g2.setFont(getFont().deriveFont(Font.BOLD, 12f));
+        drawOutlinedString(g2, "D" + (activeDistrict + 1),
+                cursorX + r + 4, cursorY - r - 2, dark);
     }
 
     private void drawOutlinedString(Graphics2D g2, String s, int x, int y, boolean dark) {
@@ -257,24 +456,37 @@ public final class MapPanel extends JPanel {
     private void drawLegend(Graphics2D g2, Color[] palette, double[] districtLean) {
         if (map == null) return;
         int x = 12, y = 12, sw = 18, sh = 14, pad = 4;
-        Color box = dark ? new Color(30, 30, 36, 220) : new Color(255, 255, 255, 220);
+        Color box = dark ? new Color(24, 24, 30, 235) : new Color(255, 255, 255, 230);
         Color text = dark ? DarkTheme.FOREGROUND : Color.DARK_GRAY;
         Color line = dark ? DarkTheme.BORDER : Color.BLACK;
 
         int rows = map.districtCount();
         g2.setColor(box);
-        g2.fillRoundRect(x - 4, y - 4, 220, rows * (sh + pad) + 24, 8, 8);
+        g2.fillRoundRect(x - 6, y - 6, 240, rows * (sh + pad) + 32, 12, 12);
+        g2.setColor(dark ? DarkTheme.ACCENT : new Color(0x1F55CC));
+        g2.setStroke(new BasicStroke(1.5f));
+        g2.drawRoundRect(x - 6, y - 6, 240, rows * (sh + pad) + 32, 12, 12);
         g2.setColor(text);
+        g2.setFont(getFont().deriveFont(Font.BOLD, 12f));
         g2.drawString(map.name(), x, y + 12);
-        y += 18;
+        g2.setFont(getFont().deriveFont(Font.PLAIN, 11f));
+        y += 22;
         for (District d : map.districts()) {
-            Color swatch = (viewMode == ViewMode.PARTISAN_LEAN)
-                    ? leanColor(districtLean[d.id()], dark)
+            boolean leanView = (viewMode == ViewMode.PARTISAN_LEAN
+                    || viewMode == ViewMode.PARTISAN_LEAN_DISTRICT);
+            Color swatch = leanView
+                    ? leanColor(safeLean(districtLean, d.id()), dark)
                     : palette[Math.floorMod(d.id(), palette.length)];
             g2.setColor(swatch);
-            g2.fillRect(x, y, sw, sh);
+            g2.fillRoundRect(x, y, sw, sh, 4, 4);
             g2.setColor(line);
-            g2.drawRect(x, y, sw, sh);
+            g2.drawRoundRect(x, y, sw, sh, 4, 4);
+            // Highlight the active district when editing.
+            if (editMode && d.id() == activeDistrict) {
+                g2.setColor(dark ? DarkTheme.ACCENT : new Color(0x1F55CC));
+                g2.setStroke(new BasicStroke(2f));
+                g2.drawRoundRect(x - 2, y - 2, sw + 4, sh + 4, 6, 6);
+            }
             g2.setColor(text);
             String leanLabel = Double.isNaN(districtLean[d.id()]) ? "—"
                     : String.format("%.0f%% D", 100 * districtLean[d.id()]);
@@ -292,7 +504,12 @@ public final class MapPanel extends JPanel {
         if (total > 0) return (double) p.demVotes() / total;
         // Fall back to the district-level lean if the precinct has no votes
         // (typical for RDH precincts that haven't yet been enriched).
-        double dl = districtLean[Math.max(0, Math.min(districtLean.length - 1, p.district()))];
+        return safeLean(districtLean, p.district());
+    }
+
+    private static double safeLean(double[] districtLean, int idx) {
+        if (districtLean.length == 0) return 0.5;
+        double dl = districtLean[Math.max(0, Math.min(districtLean.length - 1, idx))];
         return Double.isNaN(dl) ? 0.5 : dl;
     }
 
@@ -313,18 +530,59 @@ public final class MapPanel extends JPanel {
         return leans;
     }
 
-    /** Map a Dem-share in [0,1] to a red→grey→blue gradient. */
-    private static Color leanColor(double share, boolean dark) {
+    /**
+     * Map a Dem-share in [0,1] to a high-resolution diverging gradient
+     * inspired by ColorBrewer's <i>RdBu</i> ramp.
+     *
+     * <p>Compared with a plain three-stop red→grey→blue blend this
+     * interpolates over <em>nine</em> anchor colours and applies a mild
+     * sigmoid spread, so adjacent precincts at e.g. 47% and 49% Dem are
+     * visibly distinct rather than collapsing onto the same near-grey hue.
+     * The result is many more shades of red and blue across the map.
+     */
+    static Color leanColor(double share, boolean dark) {
         if (Double.isNaN(share)) return dark ? new Color(0x40, 0x40, 0x48)
                                              : new Color(0xC8, 0xC8, 0xC8);
         share = Math.max(0, Math.min(1, share));
-        Color rep = new Color(0xD7, 0x2F, 0x2F);
-        Color mid = dark ? new Color(0x80, 0x80, 0x88) : new Color(0xE5, 0xE5, 0xE5);
-        Color dem = new Color(0x1F, 0x55, 0xCC);
-        double t = (share - 0.5) * 2.0; // -1..+1
-        if (t < 0) return blend(rep, mid, 1 + t);  // -1..0
-        return blend(mid, dem, t);                 //  0..+1
+        // Mild sigmoid-style spread around 0.5 so the centre region uses
+        // more of the gradient instead of crushing everything to grey.
+        double centred = (share - 0.5) * 2.0; // -1..+1
+        double spread = Math.tanh(centred * 1.6) / Math.tanh(1.6); // -1..+1
+        double t = (spread + 1.0) * 0.5; // 0..1, monotone, smooth
+
+        Color[] stops = dark ? DARK_RDBU : LIGHT_RDBU;
+        double scaled = t * (stops.length - 1);
+        int idx = (int) Math.floor(scaled);
+        if (idx >= stops.length - 1) return stops[stops.length - 1];
+        if (idx < 0) return stops[0];
+        return blend(stops[idx], stops[idx + 1], scaled - idx);
     }
+
+    /** 9-stop diverging palette (deep red → near-white → deep blue). */
+    private static final Color[] LIGHT_RDBU = {
+            new Color(0x67, 0x00, 0x1F),
+            new Color(0xB2, 0x18, 0x2B),
+            new Color(0xD6, 0x60, 0x4D),
+            new Color(0xF4, 0xA5, 0x82),
+            new Color(0xF7, 0xF7, 0xF7),
+            new Color(0x92, 0xC5, 0xDE),
+            new Color(0x43, 0x93, 0xC3),
+            new Color(0x21, 0x66, 0xAC),
+            new Color(0x05, 0x30, 0x61),
+    };
+
+    /** 9-stop diverging palette tuned for the dark theme (mid-tone is muted grey). */
+    private static final Color[] DARK_RDBU = {
+            new Color(0x80, 0x10, 0x20),
+            new Color(0xC0, 0x30, 0x40),
+            new Color(0xE0, 0x60, 0x60),
+            new Color(0xE8, 0x9A, 0x82),
+            new Color(0x80, 0x80, 0x88),
+            new Color(0x82, 0xB0, 0xD8),
+            new Color(0x4F, 0x88, 0xC8),
+            new Color(0x2A, 0x60, 0xB0),
+            new Color(0x10, 0x38, 0x80),
+    };
 
     private static Color blend(Color a, Color b, double t) {
         t = Math.max(0, Math.min(1, t));

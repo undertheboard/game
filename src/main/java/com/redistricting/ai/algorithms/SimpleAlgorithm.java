@@ -131,48 +131,93 @@ public final class SimpleAlgorithm implements RedistrictingAlgorithm {
 
     /**
      * Greedy boundary transfers from over-populated districts to
-     * under-populated neighbours, with a per-pass move cap and a hard
-     * iteration ceiling so that we always terminate.
+     * under-populated neighbours.
+     *
+     * <p>Per pass we rank the districts by signed population deviation and
+     * try every (over, under) pair in worst-first order. When we cannot
+     * find a contiguity-preserving donor between the <em>worst</em> over /
+     * under pair we used to bail out entirely; that early exit was the main
+     * reason real datasets ended up with several-percent population skew.
+     * We now keep trying lesser-imbalance pairs, and we keep iterating as
+     * long as <em>any</em> pass made progress (capped at a generous
+     * multiple of the precinct count for safety).
      */
     private static void rebalancePopulations(int[] assignment, PrecinctBase base,
                                              GenerationParams params, int D,
                                              double idealPop) {
         int[][] adj = base.adjacency();
         List<Precinct> precincts = base.precincts();
+        // Tight default floor (0.5%) but honour a stricter user tolerance.
         double tol = Math.max(0.005, params.populationTolerance());
+        int iterCap = Math.max(2_000, precincts.size() * 4);
 
-        for (int pass = 0; pass < 400; pass++) {
+        for (int pass = 0; pass < iterCap; pass++) {
             long[] pop = new long[D];
             int[] count = new int[D];
             for (int i = 0; i < precincts.size(); i++) {
                 pop[assignment[i]] += precincts.get(i).population();
                 count[assignment[i]]++;
             }
-            int over = -1, under = -1;
-            double devOver = 0, devUnder = 0;
-            for (int d = 0; d < D; d++) {
-                double dev = (pop[d] - idealPop) / idealPop;
-                if (dev > devOver)  { devOver = dev;  over  = d; }
-                if (-dev > devUnder) { devUnder = -dev; under = d; }
-            }
-            if (over == -1 || under == -1) return;
-            if (devOver <= tol && devUnder <= tol) return;
-            if (count[over] <= 1) return;
+            // Sort district ids by deviation (most-over first, most-under last).
+            Integer[] order = new Integer[D];
+            for (int d = 0; d < D; d++) order[d] = d;
+            java.util.Arrays.sort(order, (a, b) -> Double.compare(pop[b], pop[a]));
 
-            int donor = -1;
-            int donorPop = Integer.MAX_VALUE;
-            for (int i = 0; i < assignment.length; i++) {
-                if (assignment[i] != over) continue;
-                boolean touchesUnder = false;
-                for (int nb : adj[i]) if (assignment[nb] == under) { touchesUnder = true; break; }
-                if (!touchesUnder) continue;
-                if (!GeographyUtils.wouldStayConnectedWithout(i, assignment, adj)) continue;
-                int p = precincts.get(i).population();
-                if (p < donorPop) { donorPop = p; donor = i; }
+            // Are we already within tolerance everywhere?
+            double maxAbsDev = 0;
+            for (int d = 0; d < D; d++) {
+                double dev = Math.abs(pop[d] - idealPop) / idealPop;
+                if (dev > maxAbsDev) maxAbsDev = dev;
             }
-            if (donor == -1) return;
-            assignment[donor] = under;
+            if (maxAbsDev <= tol) return;
+
+            boolean moved = false;
+            outer:
+            for (int oi = 0; oi < D; oi++) {
+                int over = order[oi];
+                if (pop[over] <= idealPop || count[over] <= 1) continue;
+                for (int ui = D - 1; ui > oi; ui--) {
+                    int under = order[ui];
+                    if (pop[under] >= idealPop) continue;
+                    int donor = pickDonor(assignment, adj, precincts, over, under,
+                            pop, idealPop);
+                    if (donor != -1) {
+                        assignment[donor] = under;
+                        moved = true;
+                        break outer;
+                    }
+                }
+            }
+            if (!moved) return;
         }
+    }
+
+    /**
+     * Choose a precinct in {@code over} that touches {@code under} and whose
+     * transfer (a) keeps {@code over} connected and (b) does not push
+     * {@code under} above ideal. Prefers the donor whose move leaves the
+     * combined absolute deviation as small as possible.
+     */
+    private static int pickDonor(int[] assignment, int[][] adj, List<Precinct> precincts,
+                                 int over, int under, long[] pop, double idealPop) {
+        int best = -1;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (int i = 0; i < assignment.length; i++) {
+            if (assignment[i] != over) continue;
+            boolean touchesUnder = false;
+            for (int nb : adj[i]) if (assignment[nb] == under) { touchesUnder = true; break; }
+            if (!touchesUnder) continue;
+            int pp = precincts.get(i).population();
+            // Avoid transfers that would simply flip the imbalance (i.e. make
+            // the under-pop district end up larger than the over-pop one was).
+            if (pop[under] + pp > pop[over]) continue;
+            if (!GeographyUtils.wouldStayConnectedWithout(i, assignment, adj)) continue;
+            double newOver = Math.abs(pop[over] - pp - idealPop);
+            double newUnder = Math.abs(pop[under] + pp - idealPop);
+            double score = newOver + newUnder;
+            if (score < bestScore) { bestScore = score; best = i; }
+        }
+        return best;
     }
 
     private static void absorb(int d, int idx, List<Precinct> precincts,
