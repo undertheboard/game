@@ -1,0 +1,90 @@
+{
+  "type": "FeatureCollection",
+  "name": "Sample Plan (6 districts)",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "District": 1,
+        "Total_2020_Total": 100000,
+        "2024_Pres_Dem": 48000,
+        "2024_Pres_Rep": 50000,
+        "2024_Pres_Oth": 2000
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0,0],[10,0],[10,30],[0,30],[0,0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "District": 2,
+        "Total_2020_Total": 101500,
+        "2024_Pres_Dem": 55000,
+        "2024_Pres_Rep": 44500,
+        "2024_Pres_Oth": 2000
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[10,0],[20,0],[20,30],[10,30],[10,0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "District": 3,
+        "Total_2020_Total": 99000,
+        "2024_Pres_Dem": 42000,
+        "2024_Pres_Rep": 55000,
+        "2024_Pres_Oth": 2000
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[20,0],[30,0],[30,30],[20,30],[20,0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "District": 4,
+        "Total_2020_Total": 100200,
+        "2024_Pres_Dem": 51000,
+        "2024_Pres_Rep": 47200,
+        "2024_Pres_Oth": 2000
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[30,0],[40,0],[40,30],[30,30],[30,0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "District": 5,
+        "Total_2020_Total": 100800,
+        "2024_Pres_Dem": 60000,
+        "2024_Pres_Rep": 38800,
+        "2024_Pres_Oth": 2000
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[40,0],[50,0],[50,30],[40,30],[40,0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "District": 6,
+        "Total_2020_Total": 98500,
+        "2024_Pres_Dem": 36000,
+        "2024_Pres_Rep": 60500,
+        "2024_Pres_Oth": 2000
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[50,0],[60,0],[60,30],[50,30],[50,0]]]
+      }
+    }
+  ]
+}
