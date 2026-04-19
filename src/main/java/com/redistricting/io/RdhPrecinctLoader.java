@@ -56,14 +56,15 @@ public final class RdhPrecinctLoader {
             if (raw == null) {
                 throw new IOException("preset resource not found: " + resourcePath);
             }
-            InputStream in = resourcePath.toLowerCase(Locale.ROOT).endsWith(".gz")
-                    ? new GZIPInputStream(raw) : raw;
-            ByteArrayOutputStream buf = new ByteArrayOutputStream();
-            byte[] chunk = new byte[8192];
-            int n;
-            while ((n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
-            String text = buf.toString(StandardCharsets.UTF_8);
-            return parsePrecinctsGeoJson(text, displayName);
+            try (InputStream in = resourcePath.toLowerCase(Locale.ROOT).endsWith(".gz")
+                    ? new GZIPInputStream(raw) : raw) {
+                ByteArrayOutputStream buf = new ByteArrayOutputStream();
+                byte[] chunk = new byte[8192];
+                int n;
+                while ((n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
+                String text = buf.toString(StandardCharsets.UTF_8);
+                return parsePrecinctsGeoJson(text, displayName);
+            }
         }
     }
 
