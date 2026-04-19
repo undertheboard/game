@@ -50,7 +50,7 @@ public final class AdvancedMultiObjectiveAlgorithm implements RedistrictingAlgor
     @Override
     public int[] assign(PrecinctBase base, GenerationParams params) {
         Random masterRng = new Random(params.seed());
-        int targetDemSeats = targetDemSeats(params.partisanBias(), params.districts());
+        int targetDemSeats = params.effectiveDemTarget();
 
         int[] bestAssignment = null;
         double bestScore = Double.POSITIVE_INFINITY;
