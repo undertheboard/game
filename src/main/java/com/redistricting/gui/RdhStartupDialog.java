@@ -1,6 +1,7 @@
 package com.redistricting.gui;
 
 import com.redistricting.io.DraGeoJsonLoader;
+import com.redistricting.io.Presets;
 import com.redistricting.io.RdhPrecinctLoader;
 import com.redistricting.model.RedistrictingMap;
 
@@ -104,6 +105,12 @@ public final class RdhStartupDialog extends JDialog {
                 "Load a statewide precinct file (.geojson) downloaded from RDH",
                 this::onLoadRdh));
         p.add(Box.createVerticalStrut(8));
+        for (Presets.Preset preset : Presets.all()) {
+            p.add(makeButton("Load preset: " + preset.displayName(),
+                    "Load the bundled " + preset.displayName() + " precinct base",
+                    () -> runLoad(preset::load, preset.displayName())));
+            p.add(Box.createVerticalStrut(8));
+        }
         p.add(makeButton("Open existing plan (DRA / GeoJSON / Map Archive / CSV)…",
                 "Open any plan you have saved or exported from Dave's Redistricting",
                 this::onOpenExisting));

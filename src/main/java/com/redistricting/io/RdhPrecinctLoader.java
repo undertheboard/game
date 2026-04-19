@@ -3,7 +3,9 @@ package com.redistricting.io;
 import com.redistricting.model.Precinct;
 import com.redistricting.model.RedistrictingMap;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.zip.GZIPInputStream;
 
 /**
  * Loaders for state precinct datasets distributed by the
@@ -36,7 +39,36 @@ public final class RdhPrecinctLoader {
     /** Load an RDH precinct GeoJSON file as a fresh, unassigned base map. */
     public static RedistrictingMap loadPrecinctsGeoJson(Path path) throws IOException {
         String text = Files.readString(path, StandardCharsets.UTF_8);
-        RedistrictingMap raw = DraGeoJsonLoader.parse(text, stem(path));
+        return parsePrecinctsGeoJson(text, stem(path));
+    }
+
+    /**
+     * Load a bundled precinct GeoJSON preset from the classpath. The
+     * resource may optionally be gzip-compressed (path ending in
+     * {@code .gz}) — gzipped resources are decompressed transparently so we
+     * can ship large statewide precinct files inside the jar without
+     * bloating its size.
+     */
+    public static RedistrictingMap loadPresetGeoJson(String resourcePath,
+                                                     String displayName) throws IOException {
+        ClassLoader cl = RdhPrecinctLoader.class.getClassLoader();
+        try (InputStream raw = cl.getResourceAsStream(resourcePath)) {
+            if (raw == null) {
+                throw new IOException("preset resource not found: " + resourcePath);
+            }
+            InputStream in = resourcePath.toLowerCase(Locale.ROOT).endsWith(".gz")
+                    ? new GZIPInputStream(raw) : raw;
+            ByteArrayOutputStream buf = new ByteArrayOutputStream();
+            byte[] chunk = new byte[8192];
+            int n;
+            while ((n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
+            String text = buf.toString(StandardCharsets.UTF_8);
+            return parsePrecinctsGeoJson(text, displayName);
+        }
+    }
+
+    private static RedistrictingMap parsePrecinctsGeoJson(String text, String name) {
+        RedistrictingMap raw = DraGeoJsonLoader.parse(text, name);
 
         // Strip whatever district id was on each feature — RDH precinct files
         // carry per-precinct geometry and stats, not a redistricting plan.

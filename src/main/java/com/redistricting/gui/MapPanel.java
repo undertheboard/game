@@ -56,6 +56,7 @@ public final class MapPanel extends JPanel {
 
     private ViewMode viewMode = ViewMode.DISTRICT;
     private boolean showPrecinctLines = true;
+    private boolean showDistrictLines = true;
     private boolean showDistrictNumbers = true;
     private boolean dark = false;
 
@@ -119,6 +120,11 @@ public final class MapPanel extends JPanel {
     public boolean isShowPrecinctLines() { return showPrecinctLines; }
     public void setShowPrecinctLines(boolean v) {
         if (v != showPrecinctLines) { showPrecinctLines = v; repaint(); }
+    }
+
+    public boolean isShowDistrictLines() { return showDistrictLines; }
+    public void setShowDistrictLines(boolean v) {
+        if (v != showDistrictLines) { showDistrictLines = v; repaint(); }
     }
 
     public boolean isShowDistrictNumbers() { return showDistrictNumbers; }
@@ -202,15 +208,17 @@ public final class MapPanel extends JPanel {
             }
         }
 
-        // Always draw district boundaries — thicker, contrasting.
-        g2.setStroke(new BasicStroke(1.8f));
-        g2.setColor(dark ? DarkTheme.MAP_BOUNDARY : Color.BLACK);
-        if (districtBoundary != null) {
-            for (double[] seg : districtBoundary) {
-                Path2D.Double line = new Path2D.Double();
-                line.moveTo(seg[0], seg[1]);
-                line.lineTo(seg[2], seg[3]);
-                g2.draw(line.createTransformedShape(t));
+        // District boundaries — thicker, contrasting; toggleable from View menu.
+        if (showDistrictLines) {
+            g2.setStroke(new BasicStroke(1.8f));
+            g2.setColor(dark ? DarkTheme.MAP_BOUNDARY : Color.BLACK);
+            if (districtBoundary != null) {
+                for (double[] seg : districtBoundary) {
+                    Path2D.Double line = new Path2D.Double();
+                    line.moveTo(seg[0], seg[1]);
+                    line.lineTo(seg[2], seg[3]);
+                    g2.draw(line.createTransformedShape(t));
+                }
             }
         }
 
