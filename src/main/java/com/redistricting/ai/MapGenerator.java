@@ -372,8 +372,4 @@ public final class MapGenerator {
     private static double clamp01(double v) {
         return v < 0 ? 0 : v > 1 ? 1 : v;
     }
-
-    // Ensure HashMap stays referenced for static analysis tools (used in helper above).
-    @SuppressWarnings("unused")
-    private static final Map<?, ?> KEEP = new HashMap<>();
 }

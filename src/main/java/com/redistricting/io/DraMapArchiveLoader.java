@@ -143,9 +143,4 @@ public final class DraMapArchiveLoader {
         int dot = name.lastIndexOf('.');
         return dot > 0 ? name.substring(0, dot) : name;
     }
-
-    // Touch StandardCharsets so static analysis doesn't flag it as unused on
-    // platforms where Files.readString already handles encoding.
-    @SuppressWarnings("unused")
-    private static final java.nio.charset.Charset CHARSET = StandardCharsets.UTF_8;
 }
