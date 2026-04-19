@@ -7,6 +7,7 @@ import com.redistricting.ai.MapGenerator;
 import com.redistricting.ai.algorithms.PrecinctBase;
 import com.redistricting.io.DraImporter;
 import com.redistricting.io.PlanGeoJsonWriter;
+import com.redistricting.io.Presets;
 import com.redistricting.io.RdhPrecinctLoader;
 import com.redistricting.model.RedistrictingMap;
 
@@ -84,6 +85,12 @@ public final class MainFrame extends JFrame {
 
         JMenuItem importRdh = new JMenuItem("Import precinct data from Redistricting Data Hub…");
         importRdh.addActionListener(e -> doImportRdh());
+        JMenu presetsMenu = new JMenu("Load bundled preset");
+        for (Presets.Preset preset : Presets.all()) {
+            JMenuItem mi = new JMenuItem(preset.displayName());
+            mi.addActionListener(e -> doLoadPreset(preset));
+            presetsMenu.add(mi);
+        }
         JMenuItem importDra = new JMenuItem("Import plan / data from Dave's Redistricting…");
         importDra.addActionListener(e -> doImportDra());
         JMenuItem applyBef = new JMenuItem("Apply block-equivalency file (CSV BEF)…");
@@ -99,6 +106,7 @@ public final class MainFrame extends JFrame {
         exit.addActionListener(e -> dispose());
 
         fileMenu.add(importRdh);
+        fileMenu.add(presetsMenu);
         fileMenu.add(importDra);
         fileMenu.add(applyBef);
         fileMenu.addSeparator();
@@ -128,6 +136,11 @@ public final class MainFrame extends JFrame {
         showPrecinctLines.addActionListener(e ->
                 mapPanel.setShowPrecinctLines(showPrecinctLines.isSelected()));
 
+        JCheckBoxMenuItem showDistrictLines =
+                new JCheckBoxMenuItem("Show district lines", true);
+        showDistrictLines.addActionListener(e ->
+                mapPanel.setShowDistrictLines(showDistrictLines.isSelected()));
+
         JCheckBoxMenuItem showDistrictNumbers =
                 new JCheckBoxMenuItem("Show district numbers", true);
         showDistrictNumbers.addActionListener(e ->
@@ -137,6 +150,7 @@ public final class MainFrame extends JFrame {
         viewMenu.add(byLean);
         viewMenu.addSeparator();
         viewMenu.add(showPrecinctLines);
+        viewMenu.add(showDistrictLines);
         viewMenu.add(showDistrictNumbers);
         return viewMenu;
     }
@@ -197,6 +211,17 @@ public final class MainFrame extends JFrame {
             refreshMapDependentItems();
         } catch (IOException | RuntimeException ex) {
             showError("Import failed", ex);
+        }
+    }
+
+    private void doLoadPreset(Presets.Preset preset) {
+        try {
+            RedistrictingMap map = preset.load();
+            mapPanel.setMap(map);
+            statusBar.setText(" " + describe(map));
+            refreshMapDependentItems();
+        } catch (IOException | RuntimeException ex) {
+            showError("Preset load failed", ex);
         }
     }
 

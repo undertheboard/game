@@ -13,14 +13,20 @@ A Java Swing desktop app that:
   `.geojson`, Map Archive `.json`, or District Data `.csv`) and the format
   is auto-detected. Map Archive `.json` files without embedded geometry
   are accepted as assignment-only overlays applied to the loaded base.
+- **Bundled state presets** for one-click loading (no download needed):
+  - **North Carolina — 2024 General (Presidential)**: 2,658 precincts
+    with the 2024 Harris (D) and Trump (R) vote totals from the NC
+    State Board of Elections (via RDH). Available from the startup
+    dialog and *File → Load bundled preset*.
 - **Saves plans** as precinct-level GeoJSON (round-trips cleanly through
   the importer) so you can move plans between sessions.
 - Uses **native OS file dialogs** — Windows Explorer on Windows, Finder
   on macOS, GTK on most Linux desktops — instead of Swing's chooser.
-- **Displays** the plan on a pannable / zoomable canvas with three
+- **Displays** the plan on a pannable / zoomable canvas with four
   independent view toggles in the *View* menu:
   - colour by district vs. by **partisan lean** (red ⇄ blue),
   - **show / hide precinct lines**,
+  - **show / hide district lines**,
   - **show / hide district numbers** (rendered with a halo at each
     district's population-weighted centroid).
 - **Analyses fairness** with an AI scorer (population deviation,
