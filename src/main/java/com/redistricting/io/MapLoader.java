@@ -72,18 +72,18 @@ public final class MapLoader {
             int dem = ((Number) require(pm, "demVotes")).intValue();
             int rep = ((Number) require(pm, "repVotes")).intValue();
             List<Object> rawPoly = (List<Object>) require(pm, "polygon");
-            List<double[]> polygon = new ArrayList<>(rawPoly.size());
+            List<double[]> ring = new ArrayList<>(rawPoly.size());
             for (Object v : rawPoly) {
                 List<Object> pair = (List<Object>) v;
                 if (pair.size() != 2) {
                     throw new IllegalArgumentException(
                             "polygon vertex must be [x,y] in precinct " + id);
                 }
-                polygon.add(new double[] {
+                ring.add(new double[] {
                         ((Number) pair.get(0)).doubleValue(),
                         ((Number) pair.get(1)).doubleValue() });
             }
-            precincts.add(new Precinct(id, district, population, dem, rep, polygon));
+            precincts.add(new Precinct(id, district, population, dem, rep, List.of(ring)));
         }
         return new RedistrictingMap(name, districts, precincts);
     }
