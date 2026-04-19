@@ -40,8 +40,40 @@ public record GenerationParams(
         double populationTolerance,
         double reliability,
         long seed,
-        String algorithm
+        String algorithm,
+        SeatTargets seatTargets
 ) {
+    /**
+     * Optional explicit seat-count target. When non-null this overrides the
+     * {@link #partisanBias} slider for any algorithm that consumes
+     * {@link com.redistricting.ai.algorithms.AdvancedMultiObjectiveAlgorithm#targetDemSeats}.
+     *
+     * <p>{@code dem + rep + tossup} need not equal the total district count
+     * — surplus seats are allocated to whichever bucket is closest to the
+     * total in proportion. {@link #demTarget()} is the canonical Dem-seat
+     * goal the generator optimises against.
+     */
+    public record SeatTargets(int dem, int rep, int tossup) {
+        public SeatTargets {
+            if (dem < 0)    dem = 0;
+            if (rep < 0)    rep = 0;
+            if (tossup < 0) tossup = 0;
+        }
+        /** Total seats requested across all three buckets. */
+        public int total() { return dem + rep + tossup; }
+        /**
+         * Convert the (dem, rep, tossup) triple into the single Dem-seat
+         * target the optimiser can compare against, by treating tossup
+         * seats as half a Dem seat each (i.e. neutral expectation).
+         */
+        public int demTarget(int districtCount) {
+            if (total() == 0) return Math.max(0, districtCount / 2);
+            double scale = (double) districtCount / total();
+            double demSeats = dem * scale + 0.5 * tossup * scale;
+            return Math.max(0, Math.min(districtCount, (int) Math.round(demSeats)));
+        }
+    }
+
     public GenerationParams {
         if (districts < 2) throw new IllegalArgumentException("districts must be >= 2");
         if (precinctsX < 4 || precinctsY < 4) {
@@ -61,6 +93,17 @@ public record GenerationParams(
         if (algorithm == null || algorithm.isBlank()) algorithm = Algorithms.SIMPLE.id();
     }
 
+    /** Backwards-compatible constructor with no explicit seat targets. */
+    public GenerationParams(int districts, int precinctsX, int precinctsY,
+                            int countiesX, int countiesY, int partisanBias,
+                            double countyAdherence, double compactness,
+                            double populationTolerance, double reliability,
+                            long seed, String algorithm) {
+        this(districts, precinctsX, precinctsY, countiesX, countiesY, partisanBias,
+                countyAdherence, compactness, populationTolerance, reliability, seed,
+                algorithm, null);
+    }
+
     /** Backwards-compatible constructor that defaults the algorithm to "simple". */
     public GenerationParams(int districts, int precinctsX, int precinctsY,
                             int countiesX, int countiesY, int partisanBias,
@@ -69,7 +112,7 @@ public record GenerationParams(
                             long seed) {
         this(districts, precinctsX, precinctsY, countiesX, countiesY, partisanBias,
                 countyAdherence, compactness, populationTolerance, reliability, seed,
-                Algorithms.SIMPLE.id());
+                Algorithms.SIMPLE.id(), null);
     }
 
     /** Number of independent generation attempts, derived from reliability. */
@@ -81,14 +124,29 @@ public record GenerationParams(
     public GenerationParams withSeed(long newSeed) {
         return new GenerationParams(districts, precinctsX, precinctsY,
                 countiesX, countiesY, partisanBias, countyAdherence, compactness,
-                populationTolerance, reliability, newSeed, algorithm);
+                populationTolerance, reliability, newSeed, algorithm, seatTargets);
     }
 
     /** Return a copy with a different algorithm id. */
     public GenerationParams withAlgorithm(String newAlgorithm) {
         return new GenerationParams(districts, precinctsX, precinctsY,
                 countiesX, countiesY, partisanBias, countyAdherence, compactness,
-                populationTolerance, reliability, seed, newAlgorithm);
+                populationTolerance, reliability, seed, newAlgorithm, seatTargets);
+    }
+
+    /**
+     * Effective Dem-seat target: explicit {@link SeatTargets#demTarget} when
+     * provided, otherwise derived from the partisan-bias slider. Exposed as
+     * a single helper so every algorithm goes through the same code path.
+     */
+    public int effectiveDemTarget() {
+        if (seatTargets != null && seatTargets.total() > 0) {
+            return seatTargets.demTarget(districts);
+        }
+        // Mirror AdvancedMultiObjectiveAlgorithm.targetDemSeats(bias, districts).
+        double frac = 0.5 + (partisanBias / 100.0) * 0.5;
+        int seats = (int) Math.round(frac * districts);
+        return Math.max(0, Math.min(districts, seats));
     }
 
     private static double clamp(double v, double lo, double hi) {

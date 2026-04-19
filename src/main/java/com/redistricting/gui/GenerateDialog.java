@@ -68,6 +68,17 @@ public final class GenerateDialog extends JDialog {
     private final JSlider popTolSlider      = labelledSlider(0, 100, 20, 25); // ‰
     private final JSlider reliabilitySlider = labelledSlider(0, 100, 50, 25);
 
+    // --- targeting controls (shared between Simple and Advanced) -------------
+    /** Selects how the partisan goal is expressed. */
+    private final JComboBox<String> targetModeCombo = new JComboBox<>(new String[] {
+            "Partisan bias slider",
+            "Explicit seat targets (D / R / Tossup)",
+    });
+    private final JSpinner demSeatsSpinner    = new JSpinner(new SpinnerNumberModel(4, 0, 200, 1));
+    private final JSpinner repSeatsSpinner    = new JSpinner(new SpinnerNumberModel(4, 0, 200, 1));
+    private final JSpinner tossupSeatsSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 200, 1));
+    private final JLabel seatTotalLabel       = new JLabel();
+
     // --- synthetic-grid (legacy) fields -------------------------------------
     private final JSpinner precinctsXSpinner =
             new JSpinner(new SpinnerNumberModel(20, 4, 200, 1));
@@ -109,6 +120,16 @@ public final class GenerateDialog extends JDialog {
         });
         algorithmCombo.setSelectedItem(Algorithms.ADVANCED);
         updateDescription();
+
+        // Seed the seat-target spinners from the (default) district count.
+        seedSeatSpinners();
+        districtsSpinner.addChangeListener(e -> seedSeatSpinners());
+        targetModeCombo.addActionListener(e -> updateTargetMode());
+        for (JSpinner s : new JSpinner[] {
+                demSeatsSpinner, repSeatsSpinner, tossupSeatsSpinner }) {
+            s.addChangeListener(e -> updateSeatTotalLabel());
+        }
+        updateSeatTotalLabel();
 
         setLayout(new BorderLayout());
         add(buildHeader(), BorderLayout.NORTH);
@@ -164,7 +185,50 @@ public final class GenerateDialog extends JDialog {
                 "Number of seats to draw");
         addRow(form, c, row++, "Random seed:", seedSpinner,
                 "Same seed + same params reproduces the same map");
+        addRow(form, c, row++, "Target by:", targetModeCombo,
+                "Choose between the partisan-bias slider and explicit per-bucket seat targets");
+        addRow(form, c, row++, "Target Dem-leaning seats:", demSeatsSpinner,
+                "How many seats should lean Democratic");
+        addRow(form, c, row++, "Target Rep-leaning seats:", repSeatsSpinner,
+                "How many seats should lean Republican");
+        addRow(form, c, row++, "Target tossup seats:", tossupSeatsSpinner,
+                "How many seats should be competitive (counted as ½ Dem in optimisation)");
+        c.gridx = 1; c.gridy = row++; c.gridwidth = 1;
+        form.add(seatTotalLabel, c);
         return form;
+    }
+
+    private void seedSeatSpinners() {
+        int districts = ((Number) districtsSpinner.getValue()).intValue();
+        int half = districts / 2;
+        int rest = districts - half * 2; // 1 if odd, 0 if even
+        demSeatsSpinner.setValue(half);
+        repSeatsSpinner.setValue(half);
+        tossupSeatsSpinner.setValue(rest);
+        updateSeatTotalLabel();
+    }
+
+    private void updateTargetMode() {
+        boolean explicit = targetModeCombo.getSelectedIndex() == 1;
+        demSeatsSpinner.setEnabled(explicit);
+        repSeatsSpinner.setEnabled(explicit);
+        tossupSeatsSpinner.setEnabled(explicit);
+        seatTotalLabel.setEnabled(explicit);
+        // Bias slider is meaningful only when not using explicit targets.
+        if (advancedMode.isSelected()) biasSlider.setEnabled(!explicit);
+    }
+
+    private void updateSeatTotalLabel() {
+        int districts = ((Number) districtsSpinner.getValue()).intValue();
+        int total = ((Number) demSeatsSpinner.getValue()).intValue()
+                  + ((Number) repSeatsSpinner.getValue()).intValue()
+                  + ((Number) tossupSeatsSpinner.getValue()).intValue();
+        String warn = (total != districts && total > 0)
+                ? "  (will be rescaled to fit " + districts + " seats)"
+                : "";
+        seatTotalLabel.setText("Sum: " + total + " / " + districts + warn);
+        seatTotalLabel.setForeground(total == districts || total == 0
+                ? java.awt.Color.GRAY : new java.awt.Color(0xCC8800));
     }
 
     private JPanel buildAdvancedTab() {
@@ -217,6 +281,7 @@ public final class GenerateDialog extends JDialog {
             algorithmCombo.setSelectedItem(Algorithms.ADVANCED);
         }
         updateDescription();
+        updateTargetMode();
     }
 
     private void updateDescription() {
@@ -276,9 +341,26 @@ public final class GenerateDialog extends JDialog {
 
     private GenerationParams collect() {
         boolean adv = advancedMode.isSelected();
-        RedistrictingAlgorithm alg = adv
-                ? (RedistrictingAlgorithm) algorithmCombo.getSelectedItem()
-                : Algorithms.SIMPLE;
+        boolean explicitSeats = targetModeCombo.getSelectedIndex() == 1;
+
+        // When the user picks explicit seat targets in Simple mode, route to
+        // the partisan-target algorithm so the targets are actually honoured.
+        RedistrictingAlgorithm alg;
+        if (adv) {
+            alg = (RedistrictingAlgorithm) algorithmCombo.getSelectedItem();
+        } else if (explicitSeats) {
+            alg = Algorithms.PARTISAN;
+        } else {
+            alg = Algorithms.SIMPLE;
+        }
+
+        GenerationParams.SeatTargets targets = explicitSeats
+                ? new GenerationParams.SeatTargets(
+                        ((Number) demSeatsSpinner.getValue()).intValue(),
+                        ((Number) repSeatsSpinner.getValue()).intValue(),
+                        ((Number) tossupSeatsSpinner.getValue()).intValue())
+                : null;
+
         return new GenerationParams(
                 ((Number) districtsSpinner.getValue()).intValue(),
                 ((Number) precinctsXSpinner.getValue()).intValue(),
@@ -291,7 +373,8 @@ public final class GenerateDialog extends JDialog {
                 adv ? popTolSlider.getValue() / 1000.0 : 0.02,
                 adv ? reliabilitySlider.getValue() / 100.0 : 0.3,
                 ((Number) seedSpinner.getValue()).longValue(),
-                alg.id());
+                alg.id(),
+                targets);
     }
 
     private static JSlider labelledSlider(int min, int max, int value, int spacing) {

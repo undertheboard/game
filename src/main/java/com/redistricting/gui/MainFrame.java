@@ -565,17 +565,39 @@ public final class MainFrame extends JFrame {
         if (params == null) return;
         RedistrictingMap baseMap = mapPanel.getMap();
         if (baseMap == null) return;
-        statusBar.setText(" Generating plan… (" + params.attempts() + " attempts)");
-        new Thread(() -> {
+
+        GenerationProgressDialog progress = new GenerationProgressDialog(this,
+                "Generating plan");
+        progress.setStatus("Generating plan… ("
+                + params.attempts() + " attempts, "
+                + baseMap.precincts().size() + " precincts)");
+        statusBar.setText(" Generating plan…");
+
+        Thread worker = new Thread(() -> {
             try {
                 PrecinctBase base = PrecinctBase.fromMap(baseMap);
                 RedistrictingMap plan = new MapGenerator().generate(base, params);
-                SwingUtilities.invokeLater(() -> adoptMap(plan));
+                SwingUtilities.invokeLater(() -> {
+                    progress.finish();
+                    if (progress.isCancelled()) {
+                        statusBar.setText(" Generation cancelled (result discarded)");
+                    } else {
+                        adoptMap(plan);
+                    }
+                });
             } catch (RuntimeException ex) {
-                SwingUtilities.invokeLater(() ->
-                        showError("Generate failed", ex));
+                SwingUtilities.invokeLater(() -> {
+                    progress.finish();
+                    showError("Generate failed", ex);
+                });
             }
-        }, "plan-generator").start();
+        }, "plan-generator");
+        worker.setDaemon(true);
+        worker.start();
+
+        // Block on the modal dialog (it returns when the worker finishes
+        // or the user clicks Cancel / closes the window).
+        progress.setVisible(true);
     }
 
     private void doNewBlankPlan() {

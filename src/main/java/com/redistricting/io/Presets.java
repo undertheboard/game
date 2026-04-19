@@ -30,7 +30,16 @@ public final class Presets {
     public record Preset(String displayName, String resourcePath) {
         /** Load the preset into a fresh {@link RedistrictingMap}. */
         public RedistrictingMap load() throws IOException {
-            return RdhPrecinctLoader.loadPresetGeoJson(resourcePath, displayName);
+            RedistrictingMap raw = RdhPrecinctLoader.loadPresetGeoJson(resourcePath, displayName);
+            // The bundled NC dataset ships with TOTPOP = ballots cast (not
+            // census residents). Rescale per-county against the 2020
+            // Decennial Census so reported populations and population-deviation
+            // analysis are in the right magnitude. Other presets (when
+            // added) are returned untouched.
+            if (resourcePath.contains("nc_2024_pres")) {
+                return CountyPopulationScaler.rescaleNc2020(raw);
+            }
+            return raw;
         }
     }
 

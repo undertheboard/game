@@ -34,8 +34,7 @@ public final class PartisanTargetAlgorithm implements RedistrictingAlgorithm {
 
     @Override
     public int[] assign(PrecinctBase base, GenerationParams params) {
-        int target = AdvancedMultiObjectiveAlgorithm.targetDemSeats(
-                params.partisanBias(), params.districts());
+        int target = params.effectiveDemTarget();
         Random rng = new Random(params.seed());
         int[] best = null;
         int bestSeatGap = Integer.MAX_VALUE;
